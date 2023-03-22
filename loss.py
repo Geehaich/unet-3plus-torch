@@ -1,6 +1,6 @@
 import torch
 
-def rollwindow(tensor,dim = 1,size = 5, step = None) :
+def rollwindow(tensor,dim = 2,size = 5, step = None) :
     if step is None :
         step = size
     result = tensor.unfold(dim,size,step)
@@ -26,7 +26,7 @@ def SSIM(image_1,image_2,beta=1,gamma=1,**rollwin_kwargs ) :
     C3 = C2/2
 
     windows_1 = rollwindow(image_1,**rollwin_kwargs)
-    windows_2 = rollwindow(image_1,**rollwin_kwargs)
+    windows_2 = rollwindow(image_2,**rollwin_kwargs)
 
     total_ssim = 0
 
@@ -44,13 +44,26 @@ def SSIM(image_1,image_2,beta=1,gamma=1,**rollwin_kwargs ) :
     return total_ssim/ (windows_1.shape[1]*windows_2.shape[2])
 
 
+def IoU(T1 :torch.Tensor,T2 :torch.Tensor) :
+
+    T1flat,T2flat = T1.flatten(),T2.flatten()
+    intersection = torch.matmul(T1flat,T2flat)
+    union = T1.sum()+T2.sum() - intersection
+    return intersection/(union+0.00001)
 
 
 
 
+def MS_SSIM_loss (pred_scales,target,betas = [1],gammas = [1]) :
 
+    SSIM_product= 1
+    for i in range(len(pred_scales)) :
+        pred = pred_scales[i]
+        beta = betas[min(i,len(betas)-1)]
+        gamma = betas[min(i,len(gammas)-1)]
+        SSIM_product *= SSIM(pred,target,beta,gamma)
 
-
+    return 1-SSIM_product
 
 
 
@@ -60,12 +73,8 @@ if __name__=="__main__":
 
     from torchvision.utils import save_image
     from torchvision.io import read_image
-    import cv2
-    I = read_image("rollwintest.jpg").unsqueeze(0)
-    Ic = I.unfold(2,50,50)
-    Ic = Ic.unfold(3,50,50)
-    s = SSIM(Ic[0,:, 2, 0].float(),Ic[0,:, 2, 0].float())
-    for i in range(6):
-        for j in range(6):
-            vig = Ic[0,:, i, j].permute(1, 2, 0)
-            cv2.imwrite(f"./vig {i}_{j}.jpg", vig.numpy())
+
+    X = read_image("imagetest.jpg").unsqueeze(0).float()
+    l = MS_SSIM_loss([X,
+                      X + 0.3 * torch.randn(X.shape),
+                      X * (1 + 0.2 * torch.randn(X.shape))], X)

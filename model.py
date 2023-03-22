@@ -2,8 +2,12 @@ import torch
 import torch.nn as tnn
 from ClassArm import ClassificationArm
 
-class UNodeDown(tnn.Module):
 
+
+
+class UNodeDown(tnn.Module):
+    """Downward layer of UNET module, contains a 2D convolution layer, an activation function and a Maxpooling layer.
+Stores its forward outputs for referencing by upwards layers."""
     def __init__(self,channels_in,channels_out,level, **layer_kwargs):
 
         super().__init__()
@@ -25,8 +29,9 @@ class UNodeDown(tnn.Module):
 
 
 class UNodeUp(tnn.Module) :
-
-    def __init__(self,single_feature_map_channels,level,connected_nodes, **layer_kwargs):
+    def __init__(self,single_feature_map_channels,n_classes,mask_shape,level,connected_nodes, **layer_kwargs):
+        """Upwards layer of UNET. handles concatenation and down/upsampling according to source layers and their levels.
+        produces a side output corresponding to the mask predicted at this scale"""
 
         super().__init__()
 
@@ -42,61 +47,77 @@ class UNodeUp(tnn.Module) :
         self.prep_layers = []
         self.sources = connected_nodes
 
+        self.side_mask_predictor = tnn.Sequential(tnn.Conv2d(self.channels_per_fmap,n_classes,3),
+                                                  tnn.Sigmoid(),
+                                                  tnn.Upsample(mask_shape)
+                                                  )
+
+        self.side_mask_output = None
+
+        # add appropriate scaling/conv pipeline to the output of other layers
+
         for node in connected_nodes :
-            if self.level > node.level :
-                s_layer = tnn.MaxPool2d(2**(self.level-node.level))
-                c_layer = tnn.Conv2d(node.conv_layer.out_channels,self.channels_per_fmap,3,padding=1)
-                self.prep_layers.append(tnn.Sequential(s_layer,c_layer))
-            elif self.level < node.level :
-                s_layer = tnn.Upsample(scale_factor=2 ** (node.level-self.level))
-                c_layer = tnn.Conv2d(node.conv_layer.out_channels, self.channels_per_fmap,3,padding=1)
-                self.prep_layers.append(tnn.Sequential(s_layer,c_layer))
-            else :
-                c_layer = tnn.Conv2d(node.conv_layer.out_channels, self.channels_per_fmap,3,padding=1)
-                self.prep_layers.append(tnn.Sequential(c_layer))
+            self.prep_layers.append(tnn.Conv2d(node.conv_layer.out_channels,
+                                                              self.channels_per_fmap,3,padding=1))
 
     def forward(self,X) :
 
         to_cat = [X]
         for i in range(len(self.sources )) :
-            Xc = self.prep_layers[i](self.sources[i].output)
+            resized_output = tnn.Upsample(X.shape[-2:],mode="nearest")(self.sources[i].output)
+            Xc = self.prep_layers[i](resized_output)
             to_cat.append(Xc)
         in_tensor = torch.cat(to_cat,1)
         Y = self.conv_layer(in_tensor)
         Y = self.activation(Y)
 
         self.output = Y
-        if self.scale_layer is not None :
+        if  self.training and self.scale_layer is not None and self.side_mask_predictor is not None:
             Y = self.scale_layer(Y)
+            self.side_mask_output = self.side_mask_predictor(Y)
         return Y
 
 
 class UNet3plus(tnn.Module) :
 
-    def __init__(self,n_classes = 1):
-
+    def __init__(self,
+                 n_classes = 1,
+                 in_channels = 3,
+                 first_output_channels = 8,
+                 upwards_feature_channels = 16,
+                 sideways_mask_shape = [200,200]):
         super().__init__()
 
 
-        self.down_nodes = [UNodeDown(3,8,1),UNodeDown(8,16,2),UNodeDown(16,32,3),UNodeDown(32,16,4)]
+        self.down_nodes = [UNodeDown(in_channels,first_output_channels,1),
+                           UNodeDown(first_output_channels,first_output_channels*2,2),
+                           UNodeDown(first_output_channels*2,first_output_channels*4,3),
+                           UNodeDown(first_output_channels*4,upwards_feature_channels,4)]
         self.up_nodes = []
         for i in range(len(self.down_nodes)) :
-            unode = UNodeUp(16,len(self.down_nodes)-i-1,connected_nodes=self.down_nodes[:len(self.down_nodes)-i]+self.up_nodes)
+            unode = UNodeUp(upwards_feature_channels,
+                            n_classes,
+                            level = len(self.down_nodes)-i-1,
+                            mask_shape = 200,
+                            connected_nodes=self.down_nodes[:len(self.down_nodes)-i]+self.up_nodes)
             self.up_nodes.append(unode)
 
         self.up_nodes[-1].scale_layer = None #last up node needs no upscaling, set to none to ignore in forward calls
 
         self.seqdown = tnn.Sequential(*self.down_nodes)
-        self.sequp = tnn.Sequential(*self.up_nodes,tnn.Conv2d(16,n_classes,3,padding=1))
+        self.sequp = tnn.Sequential(*self.up_nodes,tnn.Conv2d(upwards_feature_channels,n_classes,3,padding=1))
 
+        self.Classifier = ClassificationArm(upwards_feature_channels,n_classes)
 
+        self._side_mask_shape = sideways_mask_shape
 
     def forward(self,X):
 
         Y = self.seqdown(X)
         Y = tnn.Upsample(scale_factor=2)(Y)
+        Y_presence_prediction = self.Classifier(Y)
         Y = self.sequp(Y)
-        return tnn.Softmax()(Y)
+        return tnn.Softmax(dim=1)(Y)
 
 
 
@@ -110,7 +131,7 @@ if __name__ == "__main__" :
     #                     connected_nodes=down_nodes[:len(down_nodes) - i] + up_nodes)
     #     up_nodes.append(unode)
 
-    X = torch.randn([3,3,128,128])
+    X = torch.randn([3,3,50,50])
     model = UNet3plus(6)
     Y = model(X)
     # Y = S(X)
