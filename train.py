@@ -37,9 +37,6 @@ parser.add_argument("--model_side_mask_size",default= 256 ,help = "size of side 
 
 args = parser.parse_args()
 
-args.training_set = "/home/ottl/Téléchargements/train/"
-args.test_set = "/home/ottl/Téléchargements/valid/"
-
 
 device = torch.device(args.device) if args.device >= 0  else torch.device("cpu")
 dataset = COCODataset(args.training_set,
