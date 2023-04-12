@@ -6,9 +6,6 @@ from trainfunc import train
 from argparse import ArgumentParser
 from torch.utils.data import random_split
 
-
-model = torch.load("best.pt")
-
 parser =  ArgumentParser(
                     prog='UNET+3',
                     description='Train a UNET3+ model on a train and test set using COCO-style labels',
