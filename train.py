@@ -21,7 +21,6 @@ parser.add_argument("--batch_size",default=8,type=int)
 parser.add_argument("--device",default=0, help= "device used for training. defaults to cuda:0. -1 for cpu",type=int)
 parser.add_argument("--early_stopping_patience",default=5,type=int)
 parser.add_argument("--early_stopping_threshold",default=1e-4,type=float)
-parser.add_argument("--device",default=0, help= "device used for training. defaults to cuda:0. -1 for cpu",type=int)
 
 parser.add_argument("--save_model_directory",default='./')
 parser.add_argument("--model_first_output_channels",default= 16,type=int)
