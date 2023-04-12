@@ -4,3 +4,4 @@
 train.py
 *.idea
 __pycache__
+*.pt
